@@ -66,7 +66,7 @@ The backend uses the reusable current-user and admin dependencies on protected r
 
 Dashboard metrics are scoped to the signed-in user's records; admins receive organization-wide aggregates. AI chat requires a session and CSRF validation and receives only the submitted issue plus retrieved static knowledge-base material; it does not load ticket or workflow history. The knowledge base has no standalone data API route. Data routes and the Swagger/ReDoc/OpenAPI documentation require authentication; login, logout, and the origin-checked CSRF bootstrap are the unauthenticated auth lifecycle routes, and login/logout still require CSRF/origin validation. `/api/health` remains public with minimal status information.
 
-The current frontend has not yet been updated with a login page or cookie/CSRF request handling. Until that frontend phase is implemented, its existing API calls will receive authentication errors. Browser clients must send `credentials: "include"` and include `X-CSRF-Token` on POST/PATCH requests; obtain the token from `/api/auth/csrf` before login and use the rotated token returned after login.
+The React frontend includes the cookie-based login flow. It checks the current session on startup, uses credentialed API requests, obtains CSRF tokens from the backend, and shows navigation for the signed-in role. No session token is stored in browser storage.
 
 ## Frontend setup (PowerShell)
 
@@ -78,7 +78,7 @@ npm install
 npm run dev
 ```
 
-`VITE_API_BASE_URL` defaults to `http://127.0.0.1:8000`. The ticket list, filters, detail requests, and creation use the API. Chat responses are labeled Groq and are never replaced by mock answers when the API/key/provider is unavailable. The UI shows the backend error and retains ticket creation. Dashboard aggregate metrics and AI activity remain identified as sample data.
+`VITE_API_BASE_URL` defaults to `http://127.0.0.1:8000`. The ticket list, filters, detail requests, ticket creation, dashboard counts, and analytics use backend data. Chat responses come from Groq through the backend and are never replaced by mock answers when the API/key/provider is unavailable. Workflow diagnostic outputs are explicitly simulated and do not inspect or change devices.
 
 Frontend checks:
 
