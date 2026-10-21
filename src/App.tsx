@@ -380,7 +380,6 @@ function App() {
     const dashboardSummary = isAdmin
       ? 'Review new requests and see which tickets are still being handled.'
       : 'A quick view of your open, in-progress, and resolved requests.';
-    const recentTicketsHeading = isAdmin ? 'Latest tickets from all users' : 'Your recent tickets';
     const totalCount = tickets.length;
     const inProgressCount = tickets.filter((ticket) => ticket.status === 'In Progress').length;
     const resolvedCount = tickets.filter((ticket) => ticket.status === 'Resolved').length;
@@ -398,7 +397,7 @@ function App() {
       {!isAdmin && dashboardError && <ApiError message={dashboardError} onRetry={retryDashboard} />}
       <section className={`kpi-grid ${isAdmin ? 'admin-ticket-kpis' : 'user-kpi-grid'}`} aria-label="Ticket summary">
         {isAdmin ? <>
-          <Kpi title="Tickets" value={metricsReady ? String(totalCount) : '-'} icon={TicketIcon} tone="blue" detail="All submitted tickets" onClick={() => viewTickets('All statuses')} />
+          <Kpi title="All tickets" value={metricsReady ? String(totalCount) : '-'} icon={TicketIcon} tone="blue" detail="All submitted tickets" onClick={() => viewTickets('All statuses')} />
           <Kpi title="In progress" value={metricsReady ? String(inProgressCount) : '-'} icon={LoaderCircle} tone="amber" detail="Click to view these tickets" onClick={() => viewTickets('In Progress')} />
           <Kpi title="Resolved tickets" value={metricsReady ? String(resolvedCount) : '-'} icon={Check} tone="green" detail="Click to view these tickets" onClick={() => viewTickets('Resolved')} />
         </> : <>
@@ -408,10 +407,14 @@ function App() {
         </>}
       </section>
       <section className={`lower-grid ${isAdmin ? 'admin-dashboard-recent' : 'user-dashboard-recent'}`}>
-        <div className="card table-card">
-          <div className="card-head"><div><h2>{isAdmin ? 'Recent user tickets' : 'Your recent tickets'}</h2><p>{recentTicketsHeading}</p></div><button className="text-link" onClick={() => makePage('Tickets')}>View all tickets <ChevronRight size={14} /></button></div>
-          {isAdmin ? ticketLoading ? <LoadingState label="Loading user tickets..." /> : !ticketError ? <TicketTable tickets={tickets.slice(0, 8)} onSelect={openTicket} empty="No tickets have been submitted yet." showOwner /> : null : dashboardLoading ? <LoadingState label="Loading recent tickets..." /> : data ? <TicketTable tickets={data.recent_tickets} onSelect={openTicket} empty="No tickets have been created yet." /> : null}
-        </div>
+        {isAdmin && <div className="card table-card">
+          <div className="card-head"><div><h2>New tickets</h2><p>Open tickets waiting for an admin to review</p></div><button className="text-link" onClick={() => viewTickets('Open')}>View open tickets <ChevronRight size={14} /></button></div>
+          {ticketLoading ? <LoadingState label="Loading open tickets..." /> : !ticketError ? <TicketTable tickets={tickets.filter((ticket) => ticket.status === 'Open')} onSelect={openTicket} empty="No new tickets are waiting for review." showOwner /> : null}
+        </div>}
+        {!isAdmin && <div className="card table-card">
+          <div className="card-head"><div><h2>Your recent tickets</h2><p>Your latest support requests</p></div><button className="text-link" onClick={() => makePage('Tickets')}>View all tickets <ChevronRight size={14} /></button></div>
+          {dashboardLoading ? <LoadingState label="Loading recent tickets..." /> : data ? <TicketTable tickets={data.recent_tickets} onSelect={openTicket} empty="No tickets have been created yet." /> : null}
+        </div>}
       </section>
     </>;
   };
