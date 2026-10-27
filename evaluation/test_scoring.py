@@ -1,19 +1,23 @@
 """Offline tests for evaluation metric calculations; no app or provider imports."""
 
 import json
+import sys
 import unittest
 from io import StringIO
+import os
 from pathlib import Path
 from unittest.mock import patch
 
 from score_results import EvaluationInputError, score_results
 from run_pilot import (
     build_baseline_messages,
+    execute_workflow_in_memory,
     main as pilot_main,
     normalize_generation_kwargs,
     planned_request_count,
     proposed_decision,
     safe_failure_record,
+    should_stop_after,
 )
 
 
@@ -173,6 +177,51 @@ class ScoringTests(unittest.TestCase):
         record = safe_failure_record(ProviderFailure("private response and secret"))
         self.assertEqual(record, {"status": "provider_failure", "error_code": "GROQ_RATE_LIMITED"})
         self.assertNotIn("private", json.dumps(record))
+
+    def test_auth_and_quota_failures_stop_remaining_pilot_requests(self):
+        self.assertTrue(should_stop_after("GROQ_AUTH_FAILED"))
+        self.assertTrue(should_stop_after("GROQ_RATE_LIMITED"))
+        self.assertTrue(should_stop_after("GROQ_NOT_CONFIGURED"))
+        self.assertFalse(should_stop_after("GROQ_TIMEOUT"))
+
+    def test_proposed_workflow_uses_only_supplied_in_memory_session(self):
+        with patch.dict(os.environ, {"DATABASE_URL": "sqlite+pysqlite:///:memory:"}):
+            backend_path = str(Path(__file__).resolve().parents[1] / "backend")
+            sys.path.insert(0, backend_path)
+            from sqlalchemy import create_engine, func, select
+            from sqlalchemy.orm import Session
+            from app.database import Base
+            from app.models import WorkflowEvent
+            from app.schemas import WorkflowDiagnosis
+
+            class FakeDiagnosisService:
+                def diagnose(self, issue, sources):
+                    return WorkflowDiagnosis(
+                        summary="Intermittent Wi-Fi connectivity",
+                        category="Network",
+                        suggested_priority="Medium",
+                        likely_causes=["Weak signal"],
+                        troubleshooting_steps=["Reconnect to the verified network"],
+                    )
+
+            memory_engine = create_engine("sqlite+pysqlite:///:memory:")
+            try:
+                Base.metadata.create_all(memory_engine)
+                with Session(memory_engine, expire_on_commit=False) as db:
+                    workflow = execute_workflow_in_memory(
+                        db,
+                        "My campus Wi-Fi disconnects during class.",
+                        FakeDiagnosisService(),
+                    )
+                    event_count = db.scalar(select(func.count()).select_from(WorkflowEvent))
+
+                self.assertEqual(workflow.status, "awaiting_user")
+                self.assertEqual(workflow.tool_name, "simulated_network_connectivity")
+                self.assertIsNone(workflow.ticket_id)
+                self.assertIsNone(workflow.user_id)
+                self.assertEqual(event_count, 5)
+            finally:
+                memory_engine.dispose()
 
 if __name__ == "__main__":
     unittest.main()
