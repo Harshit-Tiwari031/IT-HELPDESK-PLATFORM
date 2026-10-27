@@ -50,6 +50,28 @@ backend\.venv\Scripts\python.exe evaluation\score_results.py --results path\to\y
 
 The command prints aggregate JSON to stdout and does not write a results file. It requires the outcomes path; it never supplies default or fabricated outcomes.
 
+## Paired pilot runner
+
+`run_pilot.py` uses the same 14 cases, model setting, retrieval function, temperature (`0.1`), and output limit (`1200`) for both variants. Its baseline is an evaluation-only LLM + retrieval prompt for safe self-service guidance; it does not request tools, verification, or a resolve/escalate decision. The proposed path calls the existing diagnosis and workflow core with only the fixed deterministic simulations. The variants still have different task prompts and response formats by design, so this is a system-level pilot rather than a causal ablation of one isolated component.
+
+From the repository root, the default preflight makes no API request and does not load settings:
+
+```powershell
+backend\.venv\Scripts\python.exe evaluation\run_pilot.py
+```
+
+After separate approval, a live run is explicitly gated and writes artifacts only to a new directory outside the repository:
+
+```powershell
+backend\.venv\Scripts\python.exe evaluation\run_pilot.py --live --output-dir "$env:TEMP\it-helpdesk-pilot-20261027"
+```
+
+For one repetition, the runner makes at most 28 provider requests: one baseline and one proposed diagnosis for each case. SDK retries are disabled. Missing-key, authentication, and rate-limit failures stop later requests; failures are recorded by safe status/code, and unrun cases remain missing. It does not print keys, prompts, response bodies, or exception text. Successful model responses and review details are written only to the supplied outside-repository output directory; keep that directory private. Baseline decisions require blinded human review before scoring. Proposed `awaiting_user` maps to a resolution recommendation pending user confirmation, not a verified fix; `needs_escalation` maps to escalation.
+
+Before importing application modules, a live run overrides `DATABASE_URL` in its own process to an in-memory SQLite URL. It binds workflow sessions to an isolated in-memory SQLite engine and never calls `get_db` or `SessionLocal`; it does not connect to configured PostgreSQL. This pilot does not test production authentication, HTTP routing, or persistent audit storage. Since tool selection is deterministic and allowlisted, the out-of-allowlist metric is a guardrail observation, not evidence that the LLM selected or attempted arbitrary tools.
+
+The runner writes `metadata.json`, `baseline_review.json`, `proposed_review.json`, and `proposed_outcomes.json` outside the repository. After blinded review, create a baseline outcomes JSON matching the scorer input schema, then score each variant separately. Do not score unreviewed baseline text or treat a simulated verification pass as a real-world resolution.
+
 ## Metrics and assumptions
 
 Decision metrics use only **completed supplied outcomes**. Missing outcomes are excluded from their denominators, listed by case ID and reason, and summarized as coverage. This avoids treating a provider failure as a system decision while making missingness visible. Report coverage with every metric; different coverage can make system comparisons misleading. Tool-attempt and latency metrics use observations supplied on any result row, including failed runs; absent observations are omitted and their observed count is reported.

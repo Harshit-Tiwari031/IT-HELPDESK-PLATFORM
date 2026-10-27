@@ -2,9 +2,19 @@
 
 import json
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from score_results import EvaluationInputError, score_results
+from run_pilot import (
+    build_baseline_messages,
+    main as pilot_main,
+    normalize_generation_kwargs,
+    planned_request_count,
+    proposed_decision,
+    safe_failure_record,
+)
 
 
 CASES = {
@@ -113,6 +123,56 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scored["missing_count"], 14)
         self.assertEqual(scored["decision_accuracy"]["value"], None)
 
+    def test_pilot_preflight_makes_no_provider_call_and_plans_28_requests(self):
+        output = StringIO()
+        with patch("sys.stdout", output):
+            exit_code = pilot_main([])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("28 Groq requests", output.getvalue())
+        self.assertIn("no key or database was accessed", output.getvalue())
+
+    def test_baseline_prompt_uses_articles_without_tools_or_decision_logic(self):
+        article = type("Article", (), {
+            "title": "Connect to verified Wi-Fi",
+            "category": "Network",
+            "steps": ("Check the network connection.",),
+        })()
+        messages = build_baseline_messages("Wi-Fi disconnects", [article])
+        full_prompt = " ".join(message["content"] for message in messages).casefold()
+
+        self.assertIn("connect to verified wi-fi", full_prompt)
+        self.assertIn("check the network connection", full_prompt)
+        self.assertIn("do not classify the issue into a resolution-versus-human-handoff outcome", full_prompt)
+        self.assertNotIn("recommend escalation", full_prompt)
+        self.assertNotIn("simulated_network_connectivity", full_prompt)
+
+    def test_both_variants_share_sampling_parameters(self):
+        normalized = normalize_generation_kwargs({
+            "model": "test-model",
+            "temperature": 0.2,
+            "max_completion_tokens": 1800,
+            "response_format": {"type": "json_object"},
+        })
+
+        self.assertEqual(normalized["temperature"], 0.1)
+        self.assertEqual(normalized["max_completion_tokens"], 1200)
+        self.assertEqual(normalized["response_format"], {"type": "json_object"})
+        self.assertEqual(planned_request_count(14), 28)
+
+    def test_proposed_mapping_is_only_a_recommendation_not_user_confirmation(self):
+        self.assertEqual(proposed_decision("awaiting_user"), "resolve")
+        self.assertEqual(proposed_decision("needs_escalation"), "escalate")
+        with self.assertRaises(ValueError):
+            proposed_decision("user_confirmed_resolved")
+
+    def test_failure_record_does_not_expose_exception_text(self):
+        class ProviderFailure(Exception):
+            code = "GROQ_RATE_LIMITED"
+
+        record = safe_failure_record(ProviderFailure("private response and secret"))
+        self.assertEqual(record, {"status": "provider_failure", "error_code": "GROQ_RATE_LIMITED"})
+        self.assertNotIn("private", json.dumps(record))
 
 if __name__ == "__main__":
     unittest.main()
